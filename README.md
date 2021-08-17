@@ -1,4 +1,4 @@
-# AI6123 Time Series Analysis
+# AI6123: Time Series Analysis
 
 Nanyang Technological University AY2020/2021 Semester 2
 
