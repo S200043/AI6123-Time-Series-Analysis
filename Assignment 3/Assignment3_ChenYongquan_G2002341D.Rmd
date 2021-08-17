@@ -1,0 +1,346 @@
+---
+title: "Assignment 3: Apple Financial Data Analysis"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+### Name: Chen Yongquan (G2002341D)
+```{r}
+library(TSA)
+library(astsa)
+library(fBasics)
+library(forecast)
+library(ggplot2)
+library(quantmod)
+library(rugarch)
+library(tseries)
+library(zoo)
+
+AAPL = getSymbols("AAPL", from='2002-02-01', to='2017-02-01', src='yahoo', auto.assign = F) 
+write.zoo(AAPL, file = "AAPL.csv", sep = ",", quote = FALSE)
+```
+```{r}
+# AAPL_data = read.table("AAPL.csv", header=T, sep=',')
+# AAPL_Adj_Close = zoo(AAPL_data$AAPL.Adjusted, as.Date(as.character(AAPL_data$Index), format = c("%Y-%m-%d")))
+(autoplot(AAPL$AAPL.Adjusted,
+          main  = "AAPL Adjusted Close from 2002-02-01 to 2017-01-31")
+        + ylab("Adj Close")
+        + xlab("Date"))
+AAPL.Weekly = ts(Ad(to.weekly(AAPL)), frequency = 52)
+autoplot(stl(AAPL.Weekly[,1], s.window="period"),
+         main  = "STL Decomposition of Weekly Data",
+         xlab  = "Date")
+ggtsdisplay(AAPL$AAPL.Adjusted,
+            main  = "AAPL Adjusted Close from 2002-02-01 to 2017-01-31",
+            ylab  = "Adj Close",
+            xlab  = "Date")
+adf.test(AAPL$AAPL.Adjusted)
+```
+```{r}
+AAPL.Adjusted_Log_Return = diff(log(AAPL$AAPL.Adjusted))*100
+AAPL.Adjusted_Log_Return = AAPL.Adjusted_Log_Return[!is.na(AAPL.Adjusted_Log_Return)] # Remove missing values
+(autoplot(AAPL.Adjusted_Log_Return,
+          main  = sprintf("Log-Returns (×100%%)", 0))
+        + ylab("Adj Close")
+        + xlab("Date")
+        + geom_abline(slope = 0, intercept = 0, col = 'red'))
+AAPL.basicStats = basicStats(AAPL.Adjusted_Log_Return)
+AAPL.basicStats
+```
+The average log return equals `r AAPL.basicStats[c("Mean"),]` with a standard error of `r AAPL.basicStats[c("SE Mean"),]`. Thus the mean of the return process if not statistically significantly different from zero.
+```{r}
+ggtsdisplay(AAPL.Adjusted_Log_Return,
+            main  = "Log-Returns (×100%%)",
+            ylab  = "Adj Close",
+            xlab  = "Date")
+ggtsdisplay(abs(AAPL.Adjusted_Log_Return),
+            main  = "Absolute Log-Returns",
+            ylab  = "Adj Close",
+            xlab  = "Date")
+ggtsdisplay(AAPL.Adjusted_Log_Return^2,
+            main  = "Squared Log-Returns",
+            ylab  = "Adj Close",
+            xlab  = "Date")
+```
+```{r}
+qqnorm(AAPL.Adjusted_Log_Return)
+qqline(AAPL.Adjusted_Log_Return, col = 'red')
+# kurtosis(AAPL.Adjusted_Log_Return)
+# skewness(AAPL.Adjusted_Log_Return)
+AAPL.basicStats[c("Kurtosis"),]
+AAPL.basicStats[c("Skewness"),]
+```
+The sample kurtosis of the log returns equals `r AAPL.basicStats[c("Kurtosis"),]`. The positive kurtosis indicates a heavy-tailed distribution.
+
+The skewness of the log returns equals `r AAPL.basicStats[c("Skewness"),]`. The negative skewness indicates the the data is skewed to the left left i.e. left tail is longer than right tail.
+```{r}
+eacf(AAPL.Adjusted_Log_Return^2)
+```
+EACF for squared log-returns suggests a GARCH(1,1) model and a possible GARCH(2,2) model.
+```{r}
+eacf(abs(AAPL.Adjusted_Log_Return))
+```
+EACF for absolute log-returns convincingly suggests a GARCH(1,1) model.
+
+```{r}
+garch11 = garch(AAPL.Adjusted_Log_Return, order = c(1,1))
+summary(garch11)
+AIC(garch11)
+```
+```{r}
+plot(residuals(garch11),type='h',ylab='Standardized Residuals')
+qqnorm(residuals(garch11)); qqline(residuals(garch11), col = 2)
+acf(residuals(garch11)^2, na.action = na.omit)
+gBox(garch11, method='squared')
+```
+
+## sGARCH(1,1)
+### sGARCH(1,1), Normal Distribution (Innovations)
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0))),
+  data = AAPL.Adjusted_Log_Return)
+```
+### sGARCH(1,1), Skew Normal Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "snorm"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### sGARCH(1,1), T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### sGARCH(1,1), Skew T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "sstd"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### sGARCH(1,1), Generalized Error Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "ged"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### sGARCH(1,1), Skew Generalized Error Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "sged"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### sGARCH(1,1), Normal Inverse Gaussian Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "nig"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### sGARCH(1,1), Generalized Hyperbolic Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "ghyp"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### sGARCH(1,1), Johnson's S<sub>U</sub> Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "jsu"),
+  data = AAPL.Adjusted_Log_Return)
+```
+## T-Distribution
+### fGARCH(1,1), GARCH, T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "fGARCH",
+                      submodel = "GARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### fGARCH(1,1), TGARCH, T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "fGARCH",
+                      submodel = "TGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### fGARCH(1,1), AVGARCH, T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "fGARCH",
+                      submodel = "AVGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### fGARCH(1,1), NGARCH, T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "fGARCH",
+                      submodel = "NGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### fGARCH(1,1), NAGARCH, T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "fGARCH",
+                      submodel = "NAGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### fGARCH(1,1), APARCH, T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "fGARCH",
+                      submodel = "APARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### fGARCH(1,1), GJRGARCH, T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "fGARCH",
+                      submodel = "GJRGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### fGARCH(1,1), ALLGARCH, T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "fGARCH",
+                      submodel = "ALLGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### eGARCH(1,1), T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "eGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### gjrGARCH(1,1), T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "gjrGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### apARCH(1,1), T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "apARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### iGARCH(1,1), T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "iGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+### csGARCH(1,1), T-Distribution
+```{r}
+ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "csGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+```
+## Forecasting with eGARCH(1,1), T-Distribution
+```{r}
+egarch11 = ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "eGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return)
+
+egarch11.forecast = ugarchforecast(egarch11, n.ahead = 30)
+egarch11.forecast
+plot(egarch11.forecast, which = 1)
+plot(egarch11.forecast, which = 3)
+```
+
+```{r}
+test_size = 90
+
+egarch11 = ugarchfit(spec = ugarchspec(
+  variance.model=list(model = "eGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return,
+  out.sample = test_size)
+
+egarch11.forecast = ugarchforecast(egarch11, n.ahead = test_size + 30, n.roll = test_size)
+egarch11.forecast
+plot(egarch11.forecast, which = 1)
+plot(egarch11.forecast, which = 2)
+plot(egarch11.forecast, which = 3)
+plot(egarch11.forecast, which = 4)
+```
+```{r}
+egarch11.forecast = ugarchroll(spec = ugarchspec(
+  variance.model=list(model = "eGARCH",
+                      garchOrder=c(1,1)),
+  mean.model=list(armaOrder = c(0,0)),
+  distribution.model = "std"),
+  data = AAPL.Adjusted_Log_Return,
+  n.ahead = 1,
+  forecast.length = 90,
+  refit.window = "recursive",
+  refit.every = 30)
+
+egarch11.forecast
+plot(egarch11.forecast, which = 1)
+plot(egarch11.forecast, which = 2)
+plot(egarch11.forecast, which = 3)
+plot(egarch11.forecast, which = 4)
+plot(egarch11.forecast, which = 5)
+```

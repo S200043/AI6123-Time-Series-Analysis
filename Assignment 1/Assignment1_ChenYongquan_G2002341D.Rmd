@@ -1,0 +1,273 @@
+---
+title: "Assignment 1: ARIMA model for WWWusage data"
+output: html_notebook
+---
+### Name: Chen Yongquan (G2002341D)
+```{r}
+library(TSA)
+library(astsa)
+library(forecast)
+```
+```{r}
+x = scan("wwwusage.txt", skip = 1, quiet = T)
+par(mar=c(4,4,2,0))
+plot(x,
+     main = "WWWusage Time Series Data",
+     ylab = "Number of users",
+     xlab = "Time (minutes)",
+     type = "l",
+     ylim = c(50,250),
+     xlim = c(0,100)
+    )
+```
+Looking at the original plot of the data itself, we see a slightly increasing linear trend, so if the series does indeed have a trend component then it is not stationary. The variance seems to be increasing with time, but it doesn’t seem to be due to a seasonality component as the periods are fluctuating. It might be due to a cyclical component, but we will keep these initial findings in mind and see if they remain after differencing.
+```{r}
+par(mar=c(4,4,2,0))
+acf(x,
+    lag.max = 100,
+    xlim = c(0,100),
+    main = "WWWUsage ACF")
+```
+We can see that the sample ACF confirms our initial premise that the data is non-stationary as the ACF dies down slowly and does not cut off even after 100 lags.
+
+```{r}
+par(mar=c(4,4,4,0))
+pacf(x,
+     lag.max = 100,
+     xlim = c(0,100),
+     main = "WWWUsage PCF")
+```
+The sample PACF is useless for determining if our series is stationary or not. Also, because we have confirmed that the original data is non-stationary, stationary AR(p) or MA(q) models would not fit to it, so it is also useless for determining if an AR(p) model would be appropriate. However, we do see that the first partial autocorrelation is much higher than the others and close to 1.0, which again confirms that the data is non-stationary.
+
+## First Order Differencing
+To make the data stationary, we will try to remove the slightly positive trend component by doing lag-1 differencing, and hopefully the cyclical pattern with increasing variance also disappears.
+```{r}
+x_d1 = diff(x, lag = 1)
+par(mar=c(4,4,2,0))
+plot(x_d1,
+     main = "WWWusage First Order Differenced",
+     ylab = "Number of users",
+     xlab = "Time (minutes)",
+     type = "o",
+     xlim = c(0,100),
+    )
+```
+We can see that the data appears more stationary now. The variance is more constant now, and the data more closely resembles white noise now.
+```{r}
+par(mar=c(4,4,2,0))
+acf(x_d1,
+    lag.max = 100,
+    xlim = c(0,100),
+    main = "First Order Differenced ACF",
+    panel.first = abline(v = seq(-10,110,1), col = "grey95")
+    )
+```
+The sample ACF dies down quickly in a damped sine-wave pattern and cuts off after lag 24, indicating that the first order differenced data is now stationary.
+```{r}
+par(mar=c(4,4,4,0))
+pacf(x_d1,
+    lag.max = 100,
+    xlim = c(0,100),
+    main = "First Order Differenced PACF",
+    panel.first = abline(v = seq(-10,110,1), col = "grey95")
+    )
+```
+The sample PACF cuts off after lag 3. Between the SACF and SPACF, the SPACF cuts off more abruptly which suggests that an ARIMA(3,1,0) model would be more appropriate for the data.
+
+## Fit ARIMA(3,1,0) model
+```{r}
+fit310 = arima(x, order = c(3,1,0))
+fit310;paste("AIC: ", AIC(fit310));paste("BIC: ", BIC(fit310))
+```
+```{r}
+par(mar=c(4,4,3,0))
+tsdiag(fit310)
+```
+The standardized residuals appear to be white noise, while the ACF of the residuals all lie within the blue boundaries indicating no significant correlation between serial observations. Finally, the p-values for the Ljung-Box test all lie significantly above the 0.05 threshold so we do not reject the null hypothesis that the residuals show no autocorrelation and accept that the ARIMA(3,1,0) model provides an adequate fit for our data.
+
+It has been reported that the p-values plotted for the Ljung-Box statistic using tsdiag() from R’s stats package are wrong when testing for autocorrelation between residuals of an estimated ARIMA model. When testing ARIMA models, tsdiag() uses the number of lags, h, for calculation of p-values where instead it should be h-(p+q) to reflect the parameter estimation of an ARIMA(p,d,q) model.
+
+A possible workaround for this is to use the sarima() function from the astsa package, which outputs the plots for diagnostic testing too when fitting a model, using the correct degrees of freedom.
+```{r}
+fit310 = sarima(x, 3, 1, 0)
+fit310
+```
+The sarima() function by default includes a constant term in the fitted model, which is equivalent to setting include.constant to TRUE for the Arima() function. We verify below that doing so results in the same fitted model with the same coefficients. The constant term corresponds to the β_0 in our trend component and any ARIMA errors will also be rolled into the constant term when fitting. We will leave the setting as is because fitting a bias term here can provide a better fit.
+```{r}
+fit310 = Arima(x, order = c(3,1,0), include.constant = T)
+fit310;paste("AIC: ", AIC(fit310));paste("BIC: ", BIC(fit310))
+```
+The final IC values that the sarima() function outputs are divided by the number of samples used to fit the model. This means that ARIMA models with higher differencing order will be penalized more as they lose one sample with each order of difference. We will thus use this value as our metric for choosing the best model of out all our adequately fitted models.
+
+The sarima() diagnostic plots for the ARIMA(3,1,0) model are shown above The conclusions remain the same, though the p-values demonstrate greater variance while there is an additional normal Q-Q plot for the standardized residuals. The relatively straight line indicates that the residuals of the fitted model follow a normal distribution and are thus likely white noise.
+
+
+## Second-Order Differencing
+Even though first order differencing already gave us a stationary series, we can try second order differencing just for the sake of exploration.
+```{r}
+x_d2 = diff(x_d1, lag = 1)
+par(mar=c(4,4,2,0))
+tsplot(x_d2,
+     main = "WWWusage Second Order Differenced",
+     ylab = "Number of users",
+     xlab = "Time (minutes)",
+     type = "o",
+     xaxt = "n",
+     xlim = c(0,100),
+     panel.first = abline(h = seq(-20,20,1), v = seq(-150,150,1), col = "gray95")
+    )
+axis(1, at=seq(-10,110,5), labels=c(NA,NA,0,NA,10,NA,20,NA,30,NA,40,NA,50,NA,60,NA,70,NA,80,NA,90,NA,100,NA,NA))
+axis(2, at=seq(-20,20,5), labels=seq(-20,20,5))
+axis(3, at=seq(-10,110,120))
+axis(4, at=seq(-20,20,40))
+```
+```{r}
+par(mar=c(4,4,0,0))
+acf1(x_d2,
+    max.lag = 97,
+    xlim = c(0,100),
+    main = "Second Order Difference ACF",
+    panel.first = abline(v = seq(-10,110,1), col = "grey95")
+    )
+```
+If we accept the presence of some outliers within the threshold of 100×5% = 5, we can see that sample ACF cuts off after lag 3. Then, we see that there are outlying spikes up to lag 53. The sample ACF plot indicates that there is more stationarity in the twice differenced data.
+```{r}
+par(mar=c(4,4,0,1))
+acf1(x_d2,
+    pacf = T,
+    max.lag = 97,
+    xlim = c(0,100),
+    main = "Second Order Difference PACF",
+    panel.first = abline(v = seq(-10,110,1), col = "grey95")
+    )
+```
+Sample PACF cut off sharply after lag 2, which is earlier than sample ACF, so we can suggest a possible ARIMA(2,2,0) model.
+
+## Fit ARIMA(2,2,0) model
+```{r}
+fit220 = sarima(x, 2, 2, 0)
+fit220
+```
+Diagnostic testing shows that model is adequate however its AIC=5.219026 is higher than that of ARIMA(3,1,0), AIC=5.188536 so we still prefer our first model.
+
+## Auto ARIMA
+We can also try using the auto.arima() from the forecast package to try and return a best model according to AIC, AICc or BIC value.
+```{r}
+fitauto = auto.arima(x)
+fitauto;paste("AIC: ", AIC(fitauto));paste("BIC: ", BIC(fitauto))
+```
+Auto ARIMA suggests an ARIMA(1,1,1) model.
+```{r}
+fitauto = sarima(x, 1, 1, 1, no.constant = T)
+fitauto
+```
+Model is adequate but its "AIC"=5.194944 is slightly higher than that of ARIMA(3,1,0), "AIC"=5.188536, while p-values for Ljung-Box statistic are closer to the threshold than that of ARIMA(3,1,0). So ARIMA(3,1,0) remains our best model.
+
+## Extended ACF for mixed ARMA(p,q) models
+We can also try using an Extended ACF matrix to choose both p and q for mixed ARIMA models.
+```{r}
+eacf(x_d1)
+```
+Starting from the bottom-right and moving towards the upper-left, we try to find the corners of triangular patterns in the EACF matrix. EACF on first order differenced data suggests ARIMA(1,1,2) as a possible model.
+
+```{r}
+eacf(x_d2)
+```
+EACF on second order differenced data suggests possible ARIMA(0,2,2) and ARIMA(2,2,0) models, the latter of which matches our suggestion based on the sample PACF.
+
+#Fit ARIMA(1,1,2) and ARIMA(0,2,2) model
+We have already tried fitting an ARIMA(2,2,0) model previously, so we will try the remaining models.
+```{r}
+fit112 = sarima(x, 1, 1, 2)
+fit112
+```
+```{r}
+fit022 = sarima(x, 0, 2, 2)
+fit022
+```
+Both models have p-values for Ljung-Box statistic falling below the 0.05 threshold, which means that the residuals show some autocorrelation, so we reject the null hypothesis that the models are adequate for our data and ignore the AIC values, though the values are still higher than our best model.
+
+## ARIMA(5,2,5), p-value, normalized AIC
+```{r}
+fit525 = sarima(x, 5, 2, 5)
+fit525
+AIC(fit525$fit)
+par(mar=c(4,4,3,0))
+tsdiag(fit525$fit)
+```
+Using arima() and tsdiag(), the ARIMA(5,2,5) model actually gives the lowest unnormalized AIC out of all our models and the Ljung-Box test also deems it an adequate model. However, the normalized AIC from sarima() using the smaller sample count for second order differenced data is actually higher than the normalized AIC for ARIMA(3,1,0). This fits the parsimony principle that more complex differenced model should be less prefered. Furthermore, the p-value for Ljung-Box test using the adjusted degrees of freedom also deems it inadequate so we can actually ignore the low AIC even before.
+
+## Forecasting Error
+To measure the performance of our model, we can try and measure its forecasting error using a test set. We demonstrate two methods of testing for forecasting error. For brevity sake, we only measure it for ARIMA(3,1,0) since we have determined it as our best model and there are no close contenders. Else, if there are other similar models, we would compare the mean absolute errors and mean square errors and choose the one with the smallest errors. MSE penalizes residuals more than MAE.
+
+#Train-Test Split
+For the first method, we can split the data into a 90:10 ratio to check for the forecasting error of our model.
+```{r}
+par(mar = c(4,4,2,0))
+ar310_train = Arima(x[1:90], order = c(3,1,0), include.constant = T)
+pred_1 = forecast(ar310_train)
+plot(c(x[1:90]), # 10-ahead forecasting with only historical data up to 90 mins
+     main = "ARIMA(3,1,0)",
+     ylab = "Number of users",
+     xlab = "Time (minutes)",
+     type = "l",
+     xaxt = "n",
+     xlim = c(0,100),
+     ylim = c(50,250),
+     panel.first = abline(h = seq(0,250,50), v = seq(0,120,10), col = "gray95")
+    )
+axis(1, at=seq(0,120,10), labels=seq(0,120,10)); lines(90:100, x[90:100], col="blue"); lines(90:100, c(x[90], pred_1$mean), col="red")
+accuracy(pred_1$mean, x[91:100])
+```
+Error is fairly high here as sequentially forecasted values are based off of prior forecasted values, and any errors in earlier forecasting will snowball into later values.
+```{r}
+par(mar = c(4,4,2,0))
+ar310_test = Arima(x[91:100], model = ar310_train)
+pred_2 = forecast(ar310_test)
+plot(c(x[1:90]), # One-step forecasting using ground truth test values
+     main = "ARIMA(3,1,0)",
+     ylab = "Number of users",
+     xlab = "Time (minutes)",
+     type = "l",
+     xaxt = "n",
+     xlim = c(0,100),
+     ylim = c(50,250),
+     panel.first = abline(h = seq(0,250,50), v = seq(0,120,10), col = "gray95")
+    )
+axis(1, at=seq(0,120,10), labels=seq(0,120,10)); lines(90:100, x[90:100], col="blue"); lines(90:100, c(x[90],pred_2$fitted), col="red")
+#sqrt(mean(pred_2$residuals^2, na.rm=TRUE))
+accuracy(pred_2$fitted, x[91:100])
+```
+Errors are lesser here because we are using the ground truth test values for one-step forecasting. This is done by fitting a new model to the test data specifying the previous model trained on training data. In so doing, the coefficients are frozen and the Arima() function instead calculates the fitted values using the test data and frozen parameters.
+
+## Rolling cross-validation
+Because the time series is chronologically dependent, we have to make a modification to the K-fold cross-validation process and discard subsequent samples after the test sets for some folds. The result is a rolling cross-validation process where the training set size gradually increases with each fold and our forecasting window rolls forward.
+```{r}
+ar310 = function(x, h) {forecast(Arima(x, order=c(3,1,0)), h = h)}
+e = tsCV(x, ar310, h = 1)
+e
+sqrt(mean(e^2, na.rm=TRUE))
+```
+## Forecasting
+```{r}
+par(mar = c(4,4,2,0))
+ar310 = Arima(x, order = c(3,1,0), include.constant = T)
+pred_1 = forecast(ar310, h = 20)
+plot(c(x, pred_1$mean),
+     main = "ARIMA(3,1,0)",
+     ylab = "Number of users",
+     xlab = "Time (minutes)",
+     type = "l",
+     xaxt = "n",
+     xlim = c(0,120),
+     ylim = c(50,350),
+     panel.first = abline(h = seq(0,250,50), v = seq(0,120,10), col = "gray95")
+    )
+axis(1, at=seq(0,120,10), labels=seq(0,120,10));lines(101:120, pred_1$mean, col="red")
+lines(100:120, c(x[100],pred_1$upper[,1]), col="blue") # 80% Upper Bound
+lines(100:120, c(x[100],pred_1$upper[,2]), col="darkblue") # 95% Upper Bound
+lines(100:120, c(x[100],pred_1$lower[,1]), col="blue") # 80% Lower Bound
+lines(100:120, c(x[100],pred_1$lower[,2]), col="darkblue") # 95% Lower Bound
+
+```
+Red line indicates the forecasted data after 100 mins. Dark blue lines indicate the 95% upper and lower bound while blue lines indicate the 80% upper and lower bound.

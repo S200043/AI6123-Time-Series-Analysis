@@ -1,0 +1,215 @@
+---
+title: "Assignment 2: Monthly Anti-Diabetic Drug Sales"
+output: html_notebook
+---
+### Name: Chen Yongquan (G2002341D)
+```{r}
+library(TSA)
+library(astsa)
+library(forecast)
+
+get_year_month <- function(date) {
+  return(
+    c(substring(date,1,4),
+      substring(date,6,7)))
+}
+
+```
+```{r}
+x = read.csv("drug.txt", colClasses = c('Date', 'numeric'))
+start = get_year_month(x$date[1])
+end = get_year_month(x$date[length(x$date)])
+x_ts = ts(x$value,
+       start,
+       end,
+       frequency = 12)
+autoplot(x_ts,
+         main  = "Monthly Anti-Diabetic Drug Sales",
+         ylab  = "Sales",
+         xlab  = "Date")
+autoplot(stl(x_ts, s.window="period"),
+         xlab  = "Date")
+```
+```{r}
+lambda = BoxCox.lambda(x$value, 'guerrero')
+x_bc = BoxCox(x$value, lambda)
+x_bc_ts = ts(x_bc,
+             start,
+             end,
+             frequency = 12)
+autoplot(x_bc_ts,
+         main  = sprintf("Box-Cox Transformation, λ = %g", lambda),
+         ylab  = "Sales",
+         xlab  = "Date")
+autoplot(stl(x_bc_ts, s.window="period"),
+         xlab  = "Date")
+```
+```{r}
+x_s12 = diff(x_bc, 12)
+end_s12 = get_year_month(x$date[length(x_s12)])
+x_s12_ts = ts(x_s12,
+              start,
+              end_s12,
+              frequency = 12)
+ggtsdisplay(x_s12_ts,
+            main  = "Lag-12 Seasonal Differencing",
+            ylab  = "Sales",
+            xlab  = "Date")
+autoplot(stl(x_s12_ts, s.window="period"),
+         xlab  = "Date")
+```
+```{r}
+fit300210 = sarima(x_bc, 3,0,0,2,1,0,12)
+fit003210 = sarima(x_bc, 0,0,3,2,1,0,12)
+fit005210 = sarima(x_bc, 0,0,5,2,1,0,12)
+fit300012 = sarima(x_bc, 3,0,0,0,1,2,12)
+fit003012 = sarima(x_bc, 0,0,3,0,1,2,12)
+fit005012 = sarima(x_bc, 0,0,5,0,1,2,12)
+```
+```{r}
+fit300012
+fit005012
+```
+```{r}
+df = data.frame()
+for (p in 0:5) {
+  for (q in 0:5) {
+    tryCatch({
+      fit = sarima(x_bc,p,0,q,2,1,0,12)
+      df = rbind(df,
+                 data.frame(p = fit$fit$arma[1],
+                            q = fit$fit$arma[2],
+                            P = fit$fit$arma[3],
+                            Q = fit$fit$arma[4],
+                            S = fit$fit$arma[5],
+                            d = fit$fit$arma[6],
+                            D = fit$fit$arma[7],
+                            AIC = fit$AIC,
+                            AICc = fit$AICc,
+                            BIC = fit$BIC))
+    },
+    error=function(cond) {},
+    warning=function(cond) {})
+    tryCatch({
+      fit = sarima(x_bc,p,0,q,0,1,2,12)
+      df = rbind(df,
+                 data.frame(p = fit$fit$arma[1],
+                            q = fit$fit$arma[2],
+                            P = fit$fit$arma[3],
+                            Q = fit$fit$arma[4],
+                            S = fit$fit$arma[5],
+                            d = fit$fit$arma[6],
+                            D = fit$fit$arma[7],
+                            AIC = fit$AIC,
+                            AICc = fit$AICc,
+                            BIC = fit$BIC))
+    },
+    error=function(cond) {},
+    warning=function(cond) {})
+  }
+}
+rm(p,q,fit)
+```
+```{r}
+train = x_bc[1:180]
+test = x_bc[181:204]
+fit301012_train = Arima(train,
+                        order = c(3,0,1),
+                        seasonal = list(order = c(0,1,2),
+                                        period = 12))
+fit301012_test = Arima(test, model = fit301012_train)
+fit301012_pred = forecast(fit301012_test)
+plot(train, # One-step forecasting using ground truth test values
+     main = "SARIMA(3,0,1,0,1,2,12)",
+     ylab = "Sales",
+     xlab = "Date",
+     type = "l",
+     xaxt = "n",
+     xlim = c(1,204),
+     ylim = c(1,3.5),
+     panel.first = abline(h = seq(1,3,0.25), v = seq(7,204,12), col = "gray95")
+    )
+axis(1,at=seq(7,204,12), labels = seq(1992,2008));lines(180:204, x_bc[180:204], col="blue");lines(180:204, c(x_bc[180],fit301012_pred$fitted), col="red")
+accuracy(fit301012_pred$fitted, x_bc[181:204])
+```
+```{r}
+train_ts = ts(train,
+              get_year_month(x$date[1]),
+              get_year_month(x$date[180]),
+              frequency = 12)
+test_ts = ts(x_bc[181:204],
+             get_year_month(x$date[181]),
+             get_year_month(x$date[204]),
+             frequency = 12)
+hw_add = hw(train_ts,
+            seasonal = 'additive')
+hw_add_test = hw(test_ts,
+                 seasonal = 'additive',
+                 model = hw_add)
+hw_add_pred = forecast(hw_add_test)
+plot(train, # One-step forecasting using ground truth test values
+     main = "Holt-Winters Additive",
+     ylab = "Sales",
+     xlab = "Date",
+     type = "l",
+     xaxt = "n",
+     xlim = c(1,204),
+     ylim = c(1,3.5),
+     panel.first = abline(h = seq(1,3,0.25), v = seq(7,204,12), col = "gray95")
+    )
+axis(1,at=seq(7,204,12), labels = seq(1992,2008));lines(180:204, x_bc[180:204], col="blue");lines(180:204, c(x_bc[180],hw_add_pred$fitted), col="red")
+accuracy(hw_add_pred$fitted, x_bc[185:204])
+```
+```{r}
+hw_mul = hw(train_ts,
+            seasonal = 'multiplicative')
+hw_mul_test = hw(test_ts,
+                 seasonal = 'multiplicative',
+                 model = hw_mul)
+hw_mul_pred = forecast(hw_mul_test)
+plot(train, # One-step forecasting using ground truth test values
+     main = "Holt Winters Multiplicative",
+     ylab = "Sales",
+     xlab = "Date",
+     type = "l",
+     xaxt = "n",
+     xlim = c(1,204),
+     ylim = c(1,3.5),
+     panel.first = abline(h = seq(1,3,0.25), v = seq(7,204,12), col = "gray95")
+    )
+axis(1,at=seq(7,204,12), labels = seq(1992,2008));lines(180:204, x_bc[180:204], col="blue");lines(180:204, c(x_bc[180],hw_mul_pred$fitted), col="red")
+accuracy(hw_mul_pred$fitted, x_bc[185:204])
+```
+```{r}
+fit301012 = Arima(x_bc,
+                  order = c(3,0,1),
+                  seasonal = list(order = c(0,1,2),
+                                  period = 12))
+pred = forecast(fit301012, h = 20)
+plot(c(x$value, InvBoxCox(pred$mean, lambda)),
+     main = "Forecast with 80% bounds: SARIMA(3,0,1,0,1,2,12)",
+     ylab = "Sales",
+     xlab = "Date",
+     type = "l",
+     xaxt = "n",
+     xlim = c(1,225),
+     ylim = c(3,45),
+     panel.first = abline(h = seq(0,40,5), v = seq(7,225,12), col = "gray95")
+    )
+lines(204:224, c(x$value[204],InvBoxCox(pred$upper[,1], lambda)), col="lightgreen") # 80% Upper Bound
+lines(204:224, c(x$value[204],InvBoxCox(pred$lower[,1], lambda)), col="lightgreen") # 80% Lower Bound
+axis(1,at=seq(7,225,12), labels = seq(1992,2010));lines(205:224, InvBoxCox(pred$mean, lambda), col="red")
+plot(c(x$value, InvBoxCox(pred$mean, lambda)),
+     main = "Forecast with 95% bounds: SARIMA(3,0,1,0,1,2,12)",
+     ylab = "Sales",
+     xlab = "Date",
+     type = "l",
+     xaxt = "n",
+     xlim = c(1,225),
+     ylim = c(3,45),
+     panel.first = abline(h = seq(0,40,5), v = seq(7,225,12), col = "gray95")
+    )
+lines(204:224, c(x$value[204],InvBoxCox(pred$upper[,2], lambda)), col="lightblue") # 95% Upper Bound
+lines(204:224, c(x$value[204],InvBoxCox(pred$lower[,2], lambda)), col="lightblue") # 95% Lower Bound
+axis(1,at=seq(7,225,12), labels = seq(1992,2010));lines(205:224, InvBoxCox(pred$mean, lambda), col="red")
+```
